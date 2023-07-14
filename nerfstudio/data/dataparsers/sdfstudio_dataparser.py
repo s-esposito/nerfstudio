@@ -46,8 +46,8 @@ class SDFStudioDataParserConfig(DataParserConfig):
     """sub sampling validation images"""
     train_val_no_overlap: bool = False
     """remove selected / sampled validation images from training set"""
-    auto_orient: bool = True
-    """automatically orient the scene such that the up direction is the same as the viewer's up direction"""
+    # auto_orient: bool = True
+    # """automatically orient the scene such that the up direction is the same as the viewer's up direction"""
     load_highres: bool = True
     """load high resolution images from dataset (cannot be True when include_mono_prior is True)"""
     # TODO supports downsample
@@ -78,9 +78,6 @@ class SDFStudio(DataParser):
             # if you use this option, training set should not contain any image in validation set
             if self.config.train_val_no_overlap:
                 indices = [i for i in indices if i % self.config.skip_every_for_val_split != 0]
-        
-        # TODO Stefano: remove
-        print(split, indices)
 
         image_filenames = []
         depth_filenames = []
@@ -112,6 +109,9 @@ class SDFStudio(DataParser):
                 depth_filename = frame.get("mono_depth_path")
                 normal_filename = frame.get("mono_normal_path")
 
+            print(image_filename)
+            print(camtoworld[0, :])
+
             # append data
             image_filenames.append(image_filename)
             if depth_filename is not None and normal_filename is not None:
@@ -133,12 +133,12 @@ class SDFStudio(DataParser):
         # Convert from COLMAP's/OPENCV's camera coordinate system to nerfstudio
         camera_to_worlds[:, 0:3, 1:3] *= -1
 
-        if self.config.auto_orient:
-            camera_to_worlds, transform = camera_utils.auto_orient_and_center_poses(
-                camera_to_worlds,
-                method="up",
-                center_method="none",
-            )
+        # if self.config.auto_orient:
+        #     camera_to_worlds, transform = camera_utils.auto_orient_and_center_poses(
+        #         camera_to_worlds,
+        #         method="up",
+        #         center_method="none",
+        #     )
 
         # scene box from meta data
         meta_scene_box = meta["scene_box"]
