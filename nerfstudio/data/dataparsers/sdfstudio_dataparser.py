@@ -42,18 +42,23 @@ class SDFStudioDataParserConfig(DataParserConfig):
     """Directory specifying location of data."""
     include_mono_prior: bool = False
     """whether or not to load monocular depth and normal """
-    include_foreground_mask: bool = False
-    """whether or not to load foreground mask"""
-    downscale_factor: int = 1
-    scene_scale: float = 2.0
-    """
-    Sets the bounding cube to have edge length of this size.
-    The longest dimension of the axis-aligned bbox will be scaled to this value.
-    """
     skip_every_for_val_split: int = 1
     """sub sampling validation images"""
+    train_val_no_overlap: bool = False
+    """remove selected / sampled validation images from training set"""
     auto_orient: bool = True
-
+    """automatically orient the scene such that the up direction is the same as the viewer's up direction"""
+    load_highres: bool = True
+    """load high resolution images from dataset (cannot be True when include_mono_prior is True)"""
+    # TODO supports downsample
+    # downscale_factor: int = 1
+    # """images downscaling factor"""
+    # TODO load fg masks
+    # include_foreground_mask: bool = False
+    # """whether or not to load foreground mask"""
+    # TODO support bounding cube scaling
+    # scene_scale: float = 2.0
+    # """sets the bounding cube to have edge length of this size; the longest dimension of the axis-aligned bbox will be scaled to this value"""
 
 @dataclass
 class SDFStudio(DataParser):
@@ -69,6 +74,13 @@ class SDFStudio(DataParser):
         # subsample to avoid out-of-memory for validation set
         if split != "train" and self.config.skip_every_for_val_split >= 1:
             indices = indices[:: self.config.skip_every_for_val_split]
+        else:
+            # if you use this option, training set should not contain any image in validation set
+            if self.config.train_val_no_overlap:
+                indices = [i for i in indices if i % self.config.skip_every_for_val_split != 0]
+        
+        # TODO Stefano: remove
+        print(split, indices)
 
         image_filenames = []
         depth_filenames = []
@@ -80,15 +92,25 @@ class SDFStudio(DataParser):
         cy = []
         camera_to_worlds = []
         for i, frame in enumerate(meta["frames"]):
+            
             if i not in indices:
                 continue
-
-            image_filename = self.config.data / frame["rgb_path"]
-            depth_filename = frame.get("mono_depth_path")
-            normal_filename = frame.get("mono_normal_path")
-
+            
             intrinsics = torch.tensor(frame["intrinsics"])
             camtoworld = torch.tensor(frame["camtoworld"])
+
+            if self.config.load_highres:
+                image_filename = self.config.data  / "image" /  frame["rgb_path"].replace("_rgb", "")
+                intrinsics[:2, :] *= 1200 / 384.0
+                intrinsics[0, 2] += 200
+                height, width = 1200, 1600
+                meta["height"], meta["width"] = height, width
+                depth_filename = None
+                normal_filename = None
+            else:
+                image_filename = self.config.data / frame["rgb_path"]
+                depth_filename = frame.get("mono_depth_path")
+                normal_filename = frame.get("mono_normal_path")
 
             # append data
             image_filenames.append(image_filename)
@@ -155,4 +177,5 @@ class SDFStudio(DataParser):
                 "include_mono_prior": self.config.include_mono_prior,
             },
         )
+
         return dataparser_outputs
