@@ -17,9 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Type
+from typing import Literal, Optional, Type
 
 import torch
+import numpy as np
 
 from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -31,6 +32,12 @@ from nerfstudio.data.dataparsers.base_dataparser import (
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.utils.io import load_from_json
 
+def filter_list(list_to_filter, indices):
+    """Returns a copy list with only selected indices"""
+    if list_to_filter:
+        return [list_to_filter[i] for i in indices]
+    else:
+        return []
 
 @dataclass
 class SDFStudioDataParserConfig(DataParserConfig):
@@ -40,25 +47,28 @@ class SDFStudioDataParserConfig(DataParserConfig):
     """target class to instantiate"""
     data: Path = Path("data/DTU/scan65")
     """Directory specifying location of data."""
+    scale_factor: float = 1.0
+    """How much to scale the camera origins by."""
+    downscale_factor: int = 1
+    """How much to downscale images."""
+    scene_scale: float = 1.0
+    """How much to scale the region of interest by."""
     include_mono_prior: bool = False
     """whether or not to load monocular depth and normal """
     skip_every_for_val_split: int = 1
     """sub sampling validation images"""
     train_val_no_overlap: bool = False
     """remove selected / sampled validation images from training set"""
-    # auto_orient: bool = True
-    # """automatically orient the scene such that the up direction is the same as the viewer's up direction"""
+    orientation_method: Literal["pca", "up", "vertical", "none"] = "up"
+    """The method to use for orientation."""
+    center_method: Literal["poses", "focus", "none"] = "poses"
+    """The method to use to center the poses."""
+    auto_scale_poses: bool = True
+    """Whether to automatically scale the poses to fit in +/- 1 bounding box."""
     load_highres: bool = True
     """load high resolution images from dataset (cannot be True when include_mono_prior is True)"""
-    # TODO supports downsample
-    # downscale_factor: int = 1
-    # """images downscaling factor"""
-    # TODO load fg masks
     # include_foreground_mask: bool = False
     # """whether or not to load foreground mask"""
-    # TODO support bounding cube scaling
-    # scene_scale: float = 2.0
-    # """sets the bounding cube to have edge length of this size; the longest dimension of the axis-aligned bbox will be scaled to this value"""
 
 @dataclass
 class SDFStudio(DataParser):
@@ -82,16 +92,15 @@ class SDFStudio(DataParser):
         image_filenames = []
         depth_filenames = []
         normal_filenames = []
+        # mask_filenames = []
         transform = None
         fx = []
         fy = []
         cx = []
         cy = []
         camera_to_worlds = []
-        for i, frame in enumerate(meta["frames"]):
-            
-            if i not in indices:
-                continue
+
+        for frame in meta["frames"]:
             
             intrinsics = torch.tensor(frame["intrinsics"])
             camtoworld = torch.tensor(frame["camtoworld"])
@@ -104,19 +113,21 @@ class SDFStudio(DataParser):
                 meta["height"], meta["width"] = height, width
                 depth_filename = None
                 normal_filename = None
+                # mask_filename = self.config.data  / "mask" /  ...
             else:
                 image_filename = self.config.data / frame["rgb_path"]
                 depth_filename = frame.get("mono_depth_path")
                 normal_filename = frame.get("mono_normal_path")
-
-            print(image_filename)
-            print(camtoworld[0, :])
+                # mask_filename = frame.get("mask_path")
 
             # append data
             image_filenames.append(image_filename)
-            if depth_filename is not None and normal_filename is not None:
+            if depth_filename is not None:
                 depth_filenames.append(self.config.data / depth_filename)
+            if normal_filename is not None:
                 normal_filenames.append(self.config.data / normal_filename)
+            # if mask_filename is not None:
+            #     mask_filenames.append(self.config.data / mask_filename)
             fx.append(intrinsics[0, 0])
             fy.append(intrinsics[1, 1])
             cx.append(intrinsics[0, 2])
@@ -133,19 +144,35 @@ class SDFStudio(DataParser):
         # Convert from COLMAP's/OPENCV's camera coordinate system to nerfstudio
         camera_to_worlds[:, 0:3, 1:3] *= -1
 
-        # if self.config.auto_orient:
-        #     camera_to_worlds, transform = camera_utils.auto_orient_and_center_poses(
-        #         camera_to_worlds,
-        #         method="up",
-        #         center_method="none",
-        #     )
-
-        # scene box from meta data
-        meta_scene_box = meta["scene_box"]
-        aabb = torch.tensor(meta_scene_box["aabb"], dtype=torch.float32)
-        scene_box = SceneBox(
-            aabb=aabb,
+        camera_to_worlds = torch.from_numpy(np.array(camera_to_worlds).astype(np.float32))
+        camera_to_worlds, transform = camera_utils.auto_orient_and_center_poses(
+            camera_to_worlds,
+            method=self.config.orientation_method,
+            center_method=self.config.center_method,
         )
+
+        # Scale poses
+        scale_factor = 1.0
+        if self.config.auto_scale_poses:
+            scale_factor /= float(torch.max(torch.abs(camera_to_worlds[:, :3, 3])))
+        scale_factor *= self.config.scale_factor
+
+        camera_to_worlds[:, :3, 3] *= scale_factor
+
+        # in x,y,z order
+        # assumes that the scene is centered at the origin
+        aabb_scale = self.config.scene_scale
+        scene_box = SceneBox(
+            aabb=torch.tensor(
+                [[-aabb_scale, -aabb_scale, -aabb_scale], [aabb_scale, aabb_scale, aabb_scale]], dtype=torch.float32
+            )
+        )
+
+        fx = fx[indices]
+        fy = fy[indices]
+        cx = cx[indices]
+        cy = cy[indices]
+        camera_to_worlds = camera_to_worlds[indices]
 
         height, width = meta["height"], meta["width"]
         cameras = Cameras(
@@ -159,13 +186,13 @@ class SDFStudio(DataParser):
             camera_type=CameraType.PERSPECTIVE,
         )
 
-        # TODO supports downsample
-        # cameras.rescale_output_resolution(scaling_factor=1.0 / self.config.downscale_factor)
+        cameras.rescale_output_resolution(scaling_factor=1.0 / self.config.downscale_factor)
+        
         if self.config.include_mono_prior:
             assert meta["has_mono_prior"], f"no mono prior in {self.config.data}"
 
         dataparser_outputs = DataparserOutputs(
-            image_filenames=image_filenames,
+            image_filenames=filter_list(image_filenames, indices),
             cameras=cameras,
             scene_box=scene_box,
             metadata={

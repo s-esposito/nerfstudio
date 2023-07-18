@@ -58,11 +58,16 @@ class NerfstudioDataParserConfig(DataParserConfig):
     """The method to use to center the poses."""
     auto_scale_poses: bool = True
     """Whether to automatically scale the poses to fit in +/- 1 bounding box."""
-    train_split_fraction: float = 0.9
-    """The fraction of images to use for training. The remaining images are for eval."""
+    # TODO Stefano: remove this
+    # train_split_fraction: float = 0.9
+    # """The fraction of images to use for training. The remaining images are for eval."""
     depth_unit_scale_factor: float = 1e-3
     """Scales the depth values to meters. Default value is 0.001 for a millimeter to meter conversion."""
-
+    # TODO Stefano: add these for easier selection of train/val images
+    skip_every_for_val_split: int = 1
+    """sub sampling validation images"""
+    train_val_no_overlap: bool = False
+    """remove selected / sampled validation images from training set"""
 
 @dataclass
 class Nerfstudio(DataParser):
@@ -183,21 +188,37 @@ class Nerfstudio(DataParser):
             raise RuntimeError(f"The dataset's list of filenames for split {split} is missing.")
         else:
             # filter image_filenames and poses based on train/eval split percentage
-            num_images = len(image_filenames)
-            num_train_images = math.ceil(num_images * self.config.train_split_fraction)
-            num_eval_images = num_images - num_train_images
-            i_all = np.arange(num_images)
-            i_train = np.linspace(
-                0, num_images - 1, num_train_images, dtype=int
-            )  # equally spaced training images starting and ending at 0 and num_images-1
-            i_eval = np.setdiff1d(i_all, i_train)  # eval images are the remaining images
-            assert len(i_eval) == num_eval_images
-            if split == "train":
-                indices = i_train
-            elif split in ["val", "test"]:
-                indices = i_eval
-            else:
-                raise ValueError(f"Unknown dataparser split {split}")
+            # num_images = len(image_filenames)
+            # num_train_images = math.ceil(num_images * self.config.train_split_fraction)
+            # num_eval_images = num_images - num_train_images
+            # i_all = np.arange(num_images)
+            # i_train = np.linspace(
+            #     0, num_images - 1, num_train_images, dtype=int
+            # )  # equally spaced training images starting and ending at 0 and num_images-1
+            # i_eval = np.setdiff1d(i_all, i_train)  # eval images are the remaining images
+            # assert len(i_eval) == num_eval_images
+            # if split == "train":
+            #     indices = i_train
+            # elif split in ["val", "test"]:
+            #     indices = i_eval
+            # else:
+            #     raise ValueError(f"Unknown dataparser split {split}")
+            
+            # filter image_filenames and poses based on skip every for val split
+            indices = list(range(len(meta["frames"])))
+            if self.config.skip_every_for_val_split >= 1:
+                
+                # training set should not contain any image in validation set
+                if split == "train" and self.config.train_val_no_overlap:
+                    indices = [i for i in indices if i % self.config.skip_every_for_val_split != 0]
+                
+                elif split in ["val", "test"]:
+                    indices = indices[:: self.config.skip_every_for_val_split]
+                
+                else:
+                    raise ValueError(f"Unknown dataparser split {split}")
+                
+            # print(f"split {split} indices: {indices}")
 
         if "orientation_override" in meta:
             orientation_method = meta["orientation_override"]
