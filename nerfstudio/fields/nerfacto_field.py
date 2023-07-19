@@ -78,6 +78,7 @@ class NerfactoField(Field):
         num_levels: int = 16,
         base_res: int = 16,
         max_res: int = 2048,
+        # growth_factor: float = 2,
         log2_hashmap_size: int = 19,
         num_layers_color: int = 3,
         num_layers_transient: int = 2,
@@ -101,6 +102,7 @@ class NerfactoField(Field):
         self.geo_feat_dim = geo_feat_dim
 
         self.register_buffer("max_res", torch.tensor(max_res))
+        # self.register_buffer("growth_factor", torch.tensor(growth_factor))
         self.register_buffer("num_levels", torch.tensor(num_levels))
         self.register_buffer("log2_hashmap_size", torch.tensor(log2_hashmap_size))
 
@@ -128,6 +130,7 @@ class NerfactoField(Field):
             num_levels=num_levels,
             min_res=base_res,
             max_res=max_res,
+            # growth_factor=growth_factor,
             log2_hashmap_size=log2_hashmap_size,
             features_per_level=features_per_level,
             implementation=implementation,

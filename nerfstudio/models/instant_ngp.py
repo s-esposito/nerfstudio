@@ -66,8 +66,16 @@ class InstantNGPModelConfig(ModelConfig):
     """Levels of the grid used for the field."""
     max_res: int = 2048
     """Maximum resolution of the hashmap for the base mlp."""
+    base_res: int = 16
+    "Hashgrid base resolution."
+    # growth_factor: float = 2.0
+    # """Growth factor of the hashgrid at each level."""
     log2_hashmap_size: int = 19
-    """Size of the hashmap for the base mlp"""
+    """Size of the hashmap for the hashgrid"""
+    num_levels: int = 16
+    """Number of levels of the hashgrid."""
+    features_per_level: int = 2
+    """Dimensionality of the features."""
     alpha_thre: float = 0.01
     """Threshold for opacity skipping."""
     cone_angle: float = 0.004
@@ -114,7 +122,11 @@ class NGPModel(Model):
             num_images=self.num_train_data,
             log2_hashmap_size=self.config.log2_hashmap_size,
             max_res=self.config.max_res,
-            spatial_distortion=scene_contraction,
+            # growth_factor=self.config.growth_factor,
+            num_levels=self.config.num_levels,
+            base_res=self.config.base_res,
+            features_per_level=self.config.features_per_level,
+            spatial_distortion=scene_contraction
         )
 
         self.scene_aabb = Parameter(self.scene_box.aabb.flatten(), requires_grad=False)

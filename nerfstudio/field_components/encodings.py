@@ -265,7 +265,8 @@ class HashEncoding(Encoding):
         self,
         num_levels: int = 16,
         min_res: int = 16,
-        max_res: int = 1024,
+        max_res: int = 2048,
+        growth_factor: float = 2,
         log2_hashmap_size: int = 19,
         features_per_level: int = 2,
         hash_init_scale: float = 0.001,
@@ -279,7 +280,12 @@ class HashEncoding(Encoding):
         self.hash_table_size = 2**log2_hashmap_size
 
         levels = torch.arange(num_levels)
-        growth_factor = np.exp((np.log(max_res) - np.log(min_res)) / (num_levels - 1)) if num_levels > 1 else 1
+        # if max_res is not None:
+            # override growth factor if max_res is set
+            # growth_factor = np.exp((np.log(max_res) - np.log(min_res)) / (num_levels - 1)) if num_levels > 1 else 1
+        growth_factor = 2.0
+        print("hashgrid growth factor", growth_factor)
+
         self.scalings = torch.floor(min_res * growth_factor**levels)
 
         self.hash_offset = levels * self.hash_table_size
